@@ -30,55 +30,168 @@ This package instead:
    low-confidence, so a caller can route uncertain extractions to manual
    review instead of trusting them blindly.
 
-## Installation (macOS / Linux)
+## Installation (Instalasi)
 
-### 1. Setup Virtual Environment (Disarankan untuk macOS)
+Pilih instruksi instalasi sesuai sistem operasi yang Anda gunakan:
 
-Di macOS (khususnya pengguna Homebrew dengan proteksi PEP 668), gunakan virtual environment agar tidak mengotori sistem OS:
+---
+
+### 🍎 Opsi A: Pengguna macOS (Apple Silicon M1/M2/M3/M4 & Intel)
+
+Di macOS (terutama pengguna Homebrew dengan proteksi PEP 668), wajib menggunakan virtual environment:
 
 ```bash
-# 1. Buat virtual environment lokal di folder project
+# 1. Buka Terminal dan masuk ke direktori project
+cd ktp-extractor-paddle-ocr
+
+# 2. Buat virtual environment
 python3 -m venv venv
 
-# 2. Aktifkan virtual environment
+# 3. Aktifkan virtual environment
 source venv/bin/activate
+
+# 4. Install dependencies (CPU-only PaddlePaddle)
+pip install -r requirements.txt
+```
+
+> **Catatan khusus Apple Silicon (MacBook M1/M2/M3/M4):**  
+> `ktp_extractor` sudah dioptimalkan default untuk arsitektur CPU ARM64 (`enable_mkldnn=False`, `cpu_threads=2`, dan auto-resizing resolusi gambar).
+> 
+> Saat pertama kali dijalankan, sistem akan mengunduh model PP-OCRv5 (~150 MB) ke `~/.paddlex`. Setelah itu, library bekerja 100% offline tanpa internet.
+
+---
+
+### 💻 Opsi B: Pengguna Non-macOS (Windows & Linux)
+
+#### 🪟 1. Pengguna Windows
+
+Pastikan Python 3.10 – 3.12 sudah terinstall dan dicentang opsi *"Add python.exe to PATH"*.
+
+**Menggunakan Command Prompt (CMD):**
+```cmd
+:: 1. Masuk ke direktori project
+cd ktp-extractor-paddle-ocr
+
+:: 2. Buat virtual environment
+python -m venv venv
+
+:: 3. Aktifkan virtual environment
+venv\Scripts\activate
+
+:: 4. Install dependencies
+pip install -r requirements.txt
+```
+
+**Menggunakan PowerShell:**
+```powershell
+# 1. Buat virtual environment
+python -m venv venv
+
+# 2. Aktifkan virtual environment
+.\venv\Scripts\Activate.ps1
+
+# Catatan: Jika muncul error "execution of scripts is disabled on this system",
+# jalankan perintah ini terlebih dahulu di sesi PowerShell Anda:
+# Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 # 3. Install dependencies
 pip install -r requirements.txt
 ```
 
-This installs CPU-only `paddlepaddle` -- do not install `paddlepaddle-gpu`,
-it isn't needed and pulls in a much larger, CUDA-dependent package.
+#### 🐧 2. Pengguna Linux (Ubuntu / Debian)
 
-> **Catatan untuk Apple Silicon (MacBook M1/M2/M3):**  
-> `ktp_extractor` sudah diatur default untuk arsitektur CPU ARM64 (`enable_mkldnn=False`, `cpu_threads=2`, dan auto-resizing resolusi gambar).
-> 
-> Pemanggilan pertama kali membutuhkan koneksi internet untuk mengunduh bobot model PP-OCRv5 (~150 MB) ke `~/.paddlex`. Setelah terunduh, library berjalan sepenuhnya offline.
+Linux membutuhkan library sistem grafis tambahan untuk OpenCV & PaddleOCR:
+
+```bash
+# 1. Install library sistem yang dibutuhkan
+sudo apt update
+sudo apt install -y python3-venv python3-pip libgl1 libglib2.0-0
+
+# 2. Masuk ke direktori project
+cd ktp-extractor-paddle-ocr
+
+# 3. Buat virtual environment
+python3 -m venv venv
+
+# 4. Aktifkan virtual environment
+source venv/bin/activate
+
+# 5. Install dependencies
+pip install -r requirements.txt
+```
+
+> **Penting (Semua OS):** `requirements.txt` menginstall `paddlepaddle` versi CPU. **Jangan** install `paddlepaddle-gpu` karena tidak diperlukan dan membutuhkan CUDA toolkit yang sangat besar.
+
+---
 
 ## Usage (Cara Menjalankan)
 
-Pastikan virtual environment dalam keadaan aktif (`source venv/bin/activate`):
+### 🍎 Cara Pakai di macOS
 
-### 1. Jalankan Script Contoh Langsung (`example_usage.py`)
-Cara paling cepat untuk mencoba ekstraksi:
+1. Buka Terminal dan pastikan virtual environment sudah aktif:
+   ```bash
+   source venv/bin/activate
+   ```
+   *(Tanda venv aktif: akan muncul `(venv)` di awal baris Terminal)*
 
-```bash
-# Menjalankan pada contoh foto KTP yang sudah ada di folder
-python example_usage.py ktp1.jpeg
-```
+2. Jalankan ekstraksi:
+   ```bash
+   # Opsi 1: Menjalankan script contoh langsung
+   python3 example_usage.py ktp1.jpeg
 
-### 2. Jalankan Lewat CLI (Format JSON)
-Untuk mendapatkan output terstruktur JSON lengkap:
+   # Opsi 2: Menggunakan CLI (Output JSON rapi)
+   python3 -m ktp_extractor.cli ktp1.jpeg --pretty
 
-```bash
-# Menampilkan JSON rapi (--pretty)
-python -m ktp_extractor.cli ktp1.jpeg --pretty
+   # Opsi 3: Simpan output JSON ke dalam file
+   python3 -m ktp_extractor.cli ktp1.jpeg > hasil_ekstraksi.json
+   ```
 
-# Format satu baris (cocok untuk piping ke jq atau file log)
-python -m ktp_extractor.cli ktp1.jpeg > output.json
-```
+---
 
-### 3. Digunakan dalam Kode Python Sendiri
+### 💻 Cara Pakai di Non-macOS
+
+#### 🪟 Windows (Command Prompt / PowerShell)
+
+1. Buka CMD / PowerShell di folder project dan aktifkan venv:
+   - **Command Prompt (CMD):**
+     ```cmd
+     venv\Scripts\activate
+     ```
+   - **PowerShell:**
+     ```powershell
+     .\venv\Scripts\Activate.ps1
+     ```
+
+2. Jalankan ekstraksi:
+   ```cmd
+   :: Opsi 1: Menjalankan script contoh
+   python example_usage.py ktp1.jpeg
+
+   :: Opsi 2: Menggunakan CLI (Output JSON rapi)
+   python -m ktp_extractor.cli ktp1.jpeg --pretty
+
+   :: Opsi 3: Simpan output JSON ke file
+   python -m ktp_extractor.cli ktp1.jpeg > hasil_ekstraksi.json
+   ```
+
+#### 🐧 Linux
+
+1. Aktifkan virtual environment:
+   ```bash
+   source venv/bin/activate
+   ```
+
+2. Jalankan ekstraksi:
+   ```bash
+   python3 example_usage.py ktp1.jpeg
+   python3 -m ktp_extractor.cli ktp1.jpeg --pretty
+   ```
+
+---
+
+### 🐍 Digunakan dalam Kode Python (Sama di Semua OS)
+
+Setelah venv aktif atau library terinstall, Anda dapat memanggilnya di skrip Python Anda:
 
 ```python
 from ktp_extractor import KTPExtractor
@@ -155,22 +268,31 @@ PaddleOCR installed.
 
 ## Running tests
 
-```bash
-python tests/test_extraction_logic.py
-```
+Pastikan virtual environment sedang aktif:
+
+- **macOS / Linux:**
+  ```bash
+  python3 tests/test_extraction_logic.py
+  ```
+- **Windows:**
+  ```cmd
+  python tests\test_extraction_logic.py
+  ```
 
 ## Storage & Cleanup (Panduan Bersih-bersih)
 
-Jika suatu saat ingin menghapus project ini dan mengembalikan kapasitas penyimpanan laptop secara tuntas:
+Jika suatu saat ingin menghapus project ini dan mengembalikan kapasitas penyimpanan secara tuntas:
 
 ### 1. Rincian Penyimpanan Terpakai
-- **Di Dalam Project (`ktp_extractor/venv`)**: `~919 MB`  
+- **Di Dalam Project (`venv/`)**: `~919 MB`  
   Semua package Python (`paddlepaddle`, `paddleocr`, `opencv`, dll). **Otomatis terhapus** bila folder project dihapus.
-- **Di Luar Project (Folder User `~`)**:
+- **Di Luar Project (Folder Pengguna `~`)**:
   - `~/.paddlex`: `~196 MB` (file bobot model AI PaddleOCR).
-  - `~/Library/Caches/pip`: `~219 MB` (cache installer sementara saat `pip install`).
+  - Cache installer pip (`~/Library/Caches/pip` di macOS, `%LocalAppData%\pip\cache` di Windows, atau `~/.cache/pip` di Linux).
 
-### 2. Cara Menghapus Bersih (100% Tuntas Bebas Sisa)
+### 2. Cara Menghapus Bersih
+
+#### 🍎 macOS & 🐧 Linux
 
 Jalankan perintah ini di Terminal:
 
@@ -178,9 +300,37 @@ Jalankan perintah ini di Terminal:
 # 1. Bersihkan cache installer pip
 pip cache purge
 
-# 2. Hapus bobot model AI dari laptop
+# 2. Hapus bobot model AI
 rm -rf ~/.paddlex
 
 # 3. Hapus virtual environment (atau hapus seluruh folder project ini)
 rm -rf venv/
+```
+
+#### 🪟 Windows
+
+Jalankan di Command Prompt (CMD):
+
+```cmd
+:: 1. Bersihkan cache installer pip
+pip cache purge
+
+:: 2. Hapus bobot model AI
+rmdir /s /q %USERPROFILE%\.paddlex
+
+:: 3. Hapus virtual environment
+rmdir /s /q venv
+```
+
+Atau di PowerShell:
+
+```powershell
+# 1. Bersihkan cache installer pip
+pip cache purge
+
+# 2. Hapus bobot model AI
+Remove-Item -Recurse -Force ~\.paddlex
+
+# 3. Hapus virtual environment
+Remove-Item -Recurse -Force .\venv
 ```
