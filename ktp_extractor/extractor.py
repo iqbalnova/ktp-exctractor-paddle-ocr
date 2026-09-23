@@ -18,7 +18,10 @@ from .fields import (
 from .layout import group_into_rows, row_text, row_confidence
 from .models import FieldResult, KTPRecord, TextBox
 from .ocr_engine import PaddleOCREngine
-from .validators import normalize_rt_rw, normalize_whitespace, validate_nik
+from .validators import (
+    clean_digit_string, normalize_rt_rw, normalize_whitespace,
+    strip_label_punctuation, validate_nik,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +97,136 @@ class KTPExtractor:
             target.confidence = row_confidence(rows[next_idx])
             target.source_row_text = texts[next_idx]
 
+        # Pass 3: Positional fallback for Nama. If Nama was not detected via label
+        # (common in faded cards), the row immediately following NIK is strictly the Name.
+        if not record.nama.found:
+            nik_row_idx = None
+            for idx, text in enumerate(texts):
+                if record.nik.found and record.nik.value and record.nik.value in clean_digit_string(text):
+                    nik_row_idx = idx
+                    break
+                elif "NIK" in text.upper():
+                    nik_row_idx = idx
+                    break
+            if nik_row_idx is not None and nik_row_idx + 1 < len(texts):
+                cand_text = texts[nik_row_idx + 1]
+                if not scan_row_for_labels(cand_text, FIELD_LABELS):
+                    clean_name = strip_label_punctuation(cand_text)
+                    if clean_name and not any(ch.isdigit() for ch in clean_name):
+                        record.nama.value = clean_name
+                        record.nama.found = True
+                        record.nama.confidence = row_confidence(rows[nik_row_idx + 1])
+                        record.nama.source_row_text = cand_text
+
+        # Pass 4: Value-driven fallback for Jenis Kelamin (e.g. lone "PEREMPUAN" or "LAKI-LAKI")
+        if not record.jenis_kelamin.found:
+            for idx, text in enumerate(texts):
+                upper = text.upper()
+                if "PEREMPUAN" in upper or "FEMALE" in upper:
+                    record.jenis_kelamin.value = "PEREMPUAN"
+                    record.jenis_kelamin.found = True
+                    record.jenis_kelamin.confidence = row_confidence(rows[idx])
+                    record.jenis_kelamin.source_row_text = text
+                    break
+                elif "LAKI" in upper or "MALE" in upper:
+                    record.jenis_kelamin.value = "LAKI-LAKI"
+                    record.jenis_kelamin.found = True
+                    record.jenis_kelamin.confidence = row_confidence(rows[idx])
+                    record.jenis_kelamin.source_row_text = text
+                    break
+
+        # Pass 5: Value-driven fallback for Agama (lone religion name on faded label)
+        if not record.agama.found:
+            RELIGIONS = ("ISLAM", "KRISTEN", "KATOLIK", "HINDU", "BUDDHA", "BUDHA", "KONGHUCU")
+            for idx, text in enumerate(texts):
+                upper = text.upper()
+                for rel in RELIGIONS:
+                    words = upper.split()
+                    if rel in words:
+                        record.agama.value = rel if rel != "BUDHA" else "BUDDHA"
+                        record.agama.found = True
+                        record.agama.confidence = row_confidence(rows[idx])
+                        record.agama.source_row_text = text
+                        break
+                if record.agama.found:
+                    break
+
+        # Pass 6: Value-driven fallback for Status Perkawinan
+        if not record.status_perkawinan.found:
+            for idx, text in enumerate(texts):
+                upper = text.upper()
+                if "BELUM KAWIN" in upper or "BELUM KAWN" in upper or "UNMARRIED" in upper:
+                    record.status_perkawinan.value = "BELUM KAWIN"
+                    record.status_perkawinan.found = True
+                    record.status_perkawinan.confidence = row_confidence(rows[idx])
+                    record.status_perkawinan.source_row_text = text
+                    break
+                elif "KAWIN" in upper or "MARRIED" in upper:
+                    if "BELUM" not in upper:
+                        record.status_perkawinan.value = "KAWIN"
+                        record.status_perkawinan.found = True
+                        record.status_perkawinan.confidence = row_confidence(rows[idx])
+                        record.status_perkawinan.source_row_text = text
+                        break
+
+        # Pass 7: Positional fallback for Alamat (row immediately preceding RT/RW if untagged)
+        if not record.alamat.found and record.rt_rw.found:
+            for idx, text in enumerate(texts):
+                if record.rt_rw.value and record.rt_rw.value in text:
+                    if idx > 0 and not scan_row_for_labels(texts[idx - 1], FIELD_LABELS):
+                        cand = strip_label_punctuation(texts[idx - 1])
+                        if cand and not any(cand.upper().startswith(kw) for kw in ("NIK", "PROVINSI", "KABUPATEN", "KOTA", "PEREMPUAN", "LAKI")):
+                            record.alamat.value = cand
+                            record.alamat.found = True
+                            record.alamat.confidence = row_confidence(rows[idx - 1])
+                            record.alamat.source_row_text = texts[idx - 1]
+                    break
+
+        # Pass 8: Positional fallback for Kecamatan (row between Kel/Desa and Agama if untagged)
+        if not record.kecamatan.found and record.kel_desa.found:
+            for idx, text in enumerate(texts):
+                if record.kel_desa.value and record.kel_desa.value in text:
+                    if idx + 1 < len(texts) and not scan_row_for_labels(texts[idx + 1], FIELD_LABELS):
+                        cand = strip_label_punctuation(texts[idx + 1])
+                        if cand and not any(rel in cand.upper() for rel in ("ISLAM", "KRISTEN", "KATOLIK", "HINDU", "BUDDHA")):
+                            record.kecamatan.value = cand
+                            record.kecamatan.found = True
+                            record.kecamatan.confidence = row_confidence(rows[idx + 1])
+                            record.kecamatan.source_row_text = texts[idx + 1]
+                    break
+
+        # Pass 9: Value-driven fallback for Kewarganegaraan
+        if not record.kewarganegaraan.found:
+            for idx, text in enumerate(texts):
+                upper = text.upper().strip()
+                words = upper.split()
+                if "WNI" in words or "WNE" in words or upper in ("WNI", "WNE", "WN", "WNA") or "WN" in words:
+                    record.kewarganegaraan.value = "WNI" if "WNA" not in upper else "WNA"
+                    record.kewarganegaraan.found = True
+                    record.kewarganegaraan.confidence = row_confidence(rows[idx])
+                    record.kewarganegaraan.source_row_text = text
+                    break
+
+        # Pass 10: Value-driven fallback for Berlaku Hingga
+        if not record.berlaku_hingga.found:
+            import re
+            date_pat = re.compile(r"(\d{2}[-\s/]\d{2}[-\s/]\d{4}|\d{4}[-\s/]\d{4})")
+            for idx in range(len(texts) - 1, max(-1, len(texts) - 4), -1):
+                upper = texts[idx].upper()
+                if "SEUMUR HIDUP" in upper:
+                    record.berlaku_hingga.value = "SEUMUR HIDUP"
+                    record.berlaku_hingga.found = True
+                    record.berlaku_hingga.confidence = row_confidence(rows[idx])
+                    record.berlaku_hingga.source_row_text = texts[idx]
+                    break
+                m = date_pat.search(upper)
+                if m:
+                    record.berlaku_hingga.value = m.group(1).replace(" ", "-")
+                    record.berlaku_hingga.found = True
+                    record.berlaku_hingga.confidence = row_confidence(rows[idx])
+                    record.berlaku_hingga.source_row_text = texts[idx]
+                    break
+
         self._postprocess(record)
         self._score(record)
         return record
@@ -104,8 +237,25 @@ class KTPExtractor:
         for i in range(limit):
             upper = texts[i].upper()
             if any(kw in upper for kw in keywords):
+                # Check if both PROVINSI and KOTA/KABUPATEN are merged into the same row
+                if keyword_or_tuple == PROVINCE_KEYWORD:
+                    for reg_kw in REGENCY_KEYWORDS:
+                        if reg_kw in upper:
+                            reg_pos = upper.find(reg_kw)
+                            val = texts[i][:reg_pos].replace(PROVINCE_KEYWORD, "").strip()
+                            target.value = normalize_whitespace(val) or None
+                            target.found = bool(target.value)
+                            target.confidence = row_confidence(rows[i])
+                            target.source_row_text = texts[i]
+                            return
+
                 value = texts[i]
                 for kw in keywords:
+                    if kw in upper:
+                        # If regency keyword is matched on a line with PROVINSI, take the part after reg_kw
+                        pos = upper.find(kw)
+                        value = texts[i][pos + len(kw):].strip()
+                        break
                     value = value.replace(kw, "").strip()
                     value = value.replace(kw.title(), "").strip()
                 target.value = normalize_whitespace(value) or None
@@ -121,10 +271,33 @@ class KTPExtractor:
 
         if record.jenis_kelamin.found and record.jenis_kelamin.value:
             v = record.jenis_kelamin.value.upper()
-            if "PEREMPUAN" in v or v.startswith("P"):
+            if "PEREMPUAN" in v or "FEMALE" in v or v.startswith("P") or v.startswith("F"):
                 record.jenis_kelamin.value = "PEREMPUAN"
-            elif "LAKI" in v or v.startswith("L"):
+            elif "LAKI" in v or "MALE" in v or v.startswith("L") or v.startswith("M"):
                 record.jenis_kelamin.value = "LAKI-LAKI"
+
+        if record.status_perkawinan.found and record.status_perkawinan.value:
+            v = record.status_perkawinan.value.upper()
+            if "BELUM" in v or "SINGLE" in v or "UNMARRIED" in v:
+                record.status_perkawinan.value = "BELUM KAWIN"
+            elif "KAWIN" in v or "MARRIED" in v:
+                record.status_perkawinan.value = "KAWIN"
+            elif "CERAI HIDUP" in v or "DIVORCED" in v:
+                record.status_perkawinan.value = "CERAI HIDUP"
+            elif "CERAI MATI" in v or "WIDOWED" in v:
+                record.status_perkawinan.value = "CERAI MATI"
+
+        if record.gol_darah.found and record.gol_darah.value:
+            v = record.gol_darah.value.upper().replace(":", "").replace(".", "").strip()
+            if v in ("A", "B", "AB", "O"):
+                record.gol_darah.value = v
+            elif not v or v == "-":
+                record.gol_darah.value = "-"
+
+        if record.kewarganegaraan.found and record.kewarganegaraan.value:
+            v = record.kewarganegaraan.value.upper()
+            if "WNI" in v:
+                record.kewarganegaraan.value = "WNI"
 
         if record.nik.found and record.nik.value:
             is_valid, cleaned, notes = validate_nik(record.nik.value)

@@ -7,7 +7,15 @@ installed at all.
 from __future__ import annotations
 
 import logging
+import math
+import os
+import warnings
 from typing import List
+
+# Suppress noisy C++ extension warnings and bypass remote model host check for speed
+warnings.filterwarnings("ignore", category=UserWarning)
+os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+os.environ.setdefault("GLOG_minloglevel", "3")
 
 from .models import TextBox, KTPExtractionError
 
@@ -53,6 +61,14 @@ class PaddleOCREngine:
             min_confidence: recognition results below this score are dropped
                 before they ever reach field matching.
         """
+        try:
+            import paddlex.utils.logging as pdx_logging
+            pdx_logging.setup_logging("ERROR")
+        except Exception:
+            pass
+        logging.getLogger("paddlex").setLevel(logging.ERROR)
+        logging.getLogger("ppocr").setLevel(logging.ERROR)
+
         try:
             from paddleocr import PaddleOCR
         except ImportError as exc:  # pragma: no cover - exercised only
@@ -107,6 +123,7 @@ class PaddleOCREngine:
             raise KTPExtractionError(f"OCR inference failed: {exc}") from exc
 
         boxes: List[TextBox] = []
+        angles: List[float] = []
         for page in results:
             res = page if isinstance(page, dict) else getattr(page, "json", {}).get("res", {})
             texts = res.get("rec_texts", [])
@@ -119,6 +136,16 @@ class PaddleOCREngine:
             for text, score, poly in zip(texts, scores, polys):
                 if score < self.min_confidence or not str(text).strip():
                     continue
+
+                # Calculate orientation angle from 4-point polygon if available
+                p = [list(pt) for pt in poly] if hasattr(poly, "__iter__") else []
+                if len(p) == 4:
+                    dx = float(p[1][0] - p[0][0])
+                    dy = float(p[1][1] - p[0][1])
+                    deg = math.degrees(math.atan2(dy, dx))
+                    if -45.0 <= deg <= 45.0:
+                        angles.append(deg)
+
                 x1, y1, x2, y2 = _poly_to_box(poly)
                 if scale != 1.0:
                     x1, y1, x2, y2 = x1 / scale, y1 / scale, x2 / scale, y2 / scale
@@ -130,6 +157,32 @@ class PaddleOCREngine:
                 "OCR produced no usable text at all -- check image quality, "
                 "focus, and that the KTP fills a reasonable portion of the frame."
             )
+
+        # Auto-deskew box coordinates if overall card tilt is detected (|median angle| >= 1.0 deg)
+        if angles:
+            import numpy as np
+            med_angle = float(np.median(angles))
+            if abs(med_angle) >= 1.0:
+                rad = math.radians(-med_angle)
+                cos_a = math.cos(rad)
+                sin_a = math.sin(rad)
+                rotated_boxes: List[TextBox] = []
+                for b in boxes:
+                    cx, cy = b.cx, b.cy
+                    new_cx = cx * cos_a - cy * sin_a
+                    new_cy = cx * sin_a + cy * cos_a
+                    bw = b.x2 - b.x1
+                    bh = b.height
+                    rotated_boxes.append(TextBox(
+                        text=b.text,
+                        confidence=b.confidence,
+                        x1=new_cx - bw / 2,
+                        y1=new_cy - bh / 2,
+                        x2=new_cx + bw / 2,
+                        y2=new_cy + bh / 2,
+                    ))
+                boxes = rotated_boxes
+
         return boxes
 
 

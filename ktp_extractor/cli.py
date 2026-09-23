@@ -11,7 +11,14 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
+import warnings
+
+# Suppress noisy C++ extension warnings and bypass remote model host check for speed
+warnings.filterwarnings("ignore", category=UserWarning)
+os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+os.environ.setdefault("GLOG_minloglevel", "3")
 
 from .extractor import KTPExtractor
 from .models import KTPExtractionError
@@ -25,6 +32,15 @@ def main() -> int:
     parser.add_argument("--pretty", action="store_true", help="Pretty-print the JSON output.")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
+
+    if not args.verbose:
+        try:
+            import paddlex.utils.logging as pdx_logging
+            pdx_logging.setup_logging("ERROR")
+        except Exception:
+            pass
+        logging.getLogger("paddlex").setLevel(logging.ERROR)
+        logging.getLogger("ppocr").setLevel(logging.ERROR)
 
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,

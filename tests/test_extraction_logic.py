@@ -136,6 +136,43 @@ def test_label_fuzzy_matching_tolerates_typo():
     print("OK: fuzzy label matching (typo-tolerant, no false positives)")
 
 
+def test_row_grouping_prevents_snowball_chaining():
+    from ktp_extractor.layout import group_into_rows
+    # 4 distinct visual rows: y centers at 100, 125, 150, 175 with height 18
+    boxes = [
+        box("Nama", 0.95, 40, 91, 100, 109),
+        box("BUDI", 0.95, 120, 92, 200, 110),
+        box("Tempat/Tgl Lahir", 0.95, 40, 116, 180, 134),
+        box("JAKARTA, 01-01-1990", 0.95, 190, 117, 350, 135),
+        box("Jenis Kelamin", 0.95, 40, 141, 160, 159),
+        box("LAKI-LAKI", 0.95, 170, 142, 260, 160),
+        box("Alamat", 0.95, 40, 166, 110, 184),
+        box("JL SUDIRMAN", 0.95, 120, 167, 280, 185),
+    ]
+    rows = group_into_rows(boxes)
+    assert len(rows) == 4, f"Expected 4 distinct rows, got {len(rows)}"
+    print("OK: row grouping prevents snowball chaining")
+
+
+def test_bilingual_wna_field_extraction():
+    extractor = KTPExtractor.__new__(KTPExtractor)
+    boxes = [
+        box("PROVINSI DKI JAKARTA", 0.98, 40, 10, 300, 30),
+        box("KOTA JAKARTA SELATAN", 0.97, 40, 32, 260, 52),
+        box("NIK", 0.99, 40, 60, 90, 80),
+        box("3171010101900001", 0.99, 100, 60, 300, 80),
+        box("Jenis kelamin MALE Gol. Darah", 0.95, 40, 90, 350, 110),
+        box("Status Perkawinan MARRIED", 0.95, 40, 120, 320, 140),
+        box("Kewarganegaraan CHINA", 0.95, 40, 150, 300, 170),
+    ]
+    record = extractor.extract_from_boxes(boxes)
+    assert record.jenis_kelamin.found is True
+    assert record.jenis_kelamin.value == "LAKI-LAKI"
+    assert record.status_perkawinan.found is True
+    assert record.status_perkawinan.value == "KAWIN"
+    print("OK: bilingual WNA field extraction & normalization")
+
+
 if __name__ == "__main__":
     test_end_to_end_extraction_with_synthetic_boxes()
     test_nik_validation_valid_male()
@@ -145,4 +182,6 @@ if __name__ == "__main__":
     test_nik_digit_confusion_repair()
     test_rt_rw_normalization_variants()
     test_label_fuzzy_matching_tolerates_typo()
+    test_row_grouping_prevents_snowball_chaining()
+    test_bilingual_wna_field_extraction()
     print("\nAll tests passed.")

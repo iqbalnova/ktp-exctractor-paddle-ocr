@@ -31,3 +31,6 @@ output.json
 *.jpg
 *.png
 !assets/example_dummy.png
+
+# Assets to ignore
+assets/

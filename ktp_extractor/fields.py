@@ -38,18 +38,21 @@ FIELD_LABELS: List[FieldLabel] = [
     FieldLabel("nik", "NIK", ("N I K", "NlK", "N1K")),
     FieldLabel("nama", "Nama", ()),
     FieldLabel("tempat_tgl_lahir", "Tempat/Tgl Lahir",
-               ("Tempat Tgl Lahir", "Tempat/TglLahir", "TempatTgl Lahir", "Tempat/Tgi Lahir")),
-    FieldLabel("jenis_kelamin", "Jenis Kelamin", ("JenisKelamin",)),
-    FieldLabel("gol_darah", "Gol. Darah", ("GolDarah", "Gol Darah")),
-    FieldLabel("alamat", "Alamat", ()),
-    FieldLabel("rt_rw", "RT/RW", ("RTRW", "RT / RW", "RT-RW")),
+               ("Tempat Tgl Lahir", "Tempat/TglLahir", "TempatTgl Lahir", "Tempat/Tgi Lahir", "Tempat/Tol Lah",
+                "Tompal/ToiLahir", "Tompal/Toi Lahir", "Tempat/Tgl Lah", "Tempat/TglLah")),
+    FieldLabel("jenis_kelamin", "Jenis Kelamin", ("JenisKelamin", "Sex", "Jenis Kelamin / Sex", "leas kela", "leas")),
+    FieldLabel("gol_darah", "Gol. Darah", ("GolDarah", "Gol Darah", "Blood Type"), min_similarity=0.85),
+    FieldLabel("alamat", "Alamat", (), min_similarity=0.82),
+    FieldLabel("rt_rw", "RT/RW", ("RTRW", "RT / RW", "RT-RW", "RTAW")),
     FieldLabel("kel_desa", "Kel/Desa", ("KelDesa", "Kel Desa", "Ke/Desa", "Kel/Kelurahan")),
-    FieldLabel("kecamatan", "Kecamatan", ()),
-    FieldLabel("agama", "Agama", ()),
-    FieldLabel("status_perkawinan", "Status Perkawinan", ("StatusPerkawinan",)),
-    FieldLabel("pekerjaan", "Pekerjaan", ()),
-    FieldLabel("kewarganegaraan", "Kewarganegaraan", ()),
-    FieldLabel("berlaku_hingga", "Berlaku Hingga", ("BerlakuHingga", "Berlaku Sampai")),
+    FieldLabel("kecamatan", "Kecamatan", ("uatan", "Kec.", "Kec")),
+    FieldLabel("agama", "Agama", ("Religion", "Agama / Religion")),
+    FieldLabel("status_perkawinan", "Status Perkawinan",
+               ("StatusPerkawinan", "Status Pedawnan", "Status", "Marital Status", "Status Perkawinan / Marital Status")),
+    FieldLabel("pekerjaan", "Pekerjaan", ("Occupation", "Pekerian", "Pekorjaan", "Pekerpaan", "Pekerjaan / Occupation")),
+    FieldLabel("kewarganegaraan", "Kewarganegaraan",
+               ("Nationality", "Kewargnegaraan", "Kevarganegaraan", "Kawarganegaraan", "Ke aan WN", "Ke aan", "Kewarganegaraan / Nationality")),
+    FieldLabel("berlaku_hingga", "Berlaku Hingga", ("BerlakuHingga", "Berlaku Sampai", "Berlaku Hegga", "Expiry Date")),
 ]
 
 # These two never appear with a colon-style label; they're printed as a bare
@@ -69,18 +72,29 @@ def _label_match_length(words: List[str], start: int, label: FieldLabel) -> Opti
 
     The candidate prefix length is anchored to each candidate string's OWN
     word count (±1, to tolerate OCR merging/splitting a word), rather than
-    trying arbitrary lengths -- matching against a growing prefix of
-    unrelated length is what let a short label like "NIK" falsely match
-    against a long run of following, unrelated words in earlier testing.
+    trying arbitrary lengths.
     """
     candidates = (label.canonical, *label.aliases)
+
+    # Pass 1: exact match (case-insensitive)
     for candidate in candidates:
         base_len = len(candidate.split())
         for word_count in (base_len, base_len - 1, base_len + 1):
             if word_count <= 0 or start + word_count > len(words):
                 continue
             prefix = " ".join(words[start:start + word_count])
-            if _similarity(prefix, candidate) >= label.min_similarity:
+            if prefix.lower() == candidate.lower():
+                return word_count
+
+    # Pass 2: fuzzy match with guard against over-consuming unrelated leading words
+    for candidate in candidates:
+        base_len = len(candidate.split())
+        for word_count in (base_len, base_len - 1, base_len + 1):
+            if word_count <= 0 or start + word_count > len(words):
+                continue
+            prefix = " ".join(words[start:start + word_count])
+            req_sim = max(label.min_similarity, 0.85) if word_count > base_len else label.min_similarity
+            if _similarity(prefix, candidate) >= req_sim:
                 return word_count
     return None
 

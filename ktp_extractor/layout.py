@@ -13,29 +13,48 @@ from typing import List
 from .models import TextBox
 
 
-def group_into_rows(boxes: List[TextBox], y_overlap_ratio: float = 0.5) -> List[List[TextBox]]:
+def group_into_rows(boxes: List[TextBox], y_threshold_ratio: float = 0.42) -> List[List[TextBox]]:
     """Group text boxes into left-to-right reading-order rows.
 
-    Two boxes are considered part of the same row if their vertical spans
-    overlap by at least ``y_overlap_ratio`` of the shorter box's height.
-    This tolerates the few-degree tilt that's common in phone photos of a
-    KTP, without needing a full deskew step.
+    Boxes are grouped based on vertical center (cy) proximity relative to
+    the median font height of the candidate row. This prevents the classic
+    'snowball' chaining bug where an expanding min-y to max-y bounding box
+    greedily swallows lower lines on tilted or multi-column layouts.
     """
     if not boxes:
         return []
 
-    # Sort by vertical position first so rows are built top-to-bottom.
-    remaining = sorted(boxes, key=lambda b: b.cy)
+    # Sort boxes top to bottom by vertical center
+    sorted_boxes = sorted(boxes, key=lambda b: b.cy)
     rows: List[List[TextBox]] = []
 
-    for box in remaining:
-        placed = False
-        for row in rows:
-            if _overlaps_row(box, row, y_overlap_ratio):
-                row.append(box)
-                placed = True
-                break
-        if not placed:
+    for box in sorted_boxes:
+        best_row = None
+        min_dist = float("inf")
+        for r in rows:
+            # Check horizontal collision: two boxes cannot belong to the same text line
+            # if they are vertically stacked over the same horizontal X span.
+            has_x_collision = False
+            for existing in r:
+                x_overlap = min(box.x2, existing.x2) - max(box.x1, existing.x1)
+                shorter_w = min(box.x2 - box.x1, existing.x2 - existing.x1)
+                if shorter_w > 0 and x_overlap / shorter_w > 0.35:
+                    has_x_collision = True
+                    break
+            if has_x_collision:
+                continue
+
+            mean_cy = sum(b.cy for b in r) / len(r)
+            # Use median box height in the row as reference font scale
+            sorted_h = sorted(b.height for b in r)
+            median_h = sorted_h[len(sorted_h) // 2]
+            dist = abs(box.cy - mean_cy)
+            if dist <= median_h * y_threshold_ratio and dist < min_dist:
+                best_row = r
+                min_dist = dist
+        if best_row is not None:
+            best_row.append(box)
+        else:
             rows.append([box])
 
     # Order rows top-to-bottom, and boxes within each row left-to-right.
@@ -46,7 +65,8 @@ def group_into_rows(boxes: List[TextBox], y_overlap_ratio: float = 0.5) -> List[
     return rows
 
 
-def _overlaps_row(box: TextBox, row: List[TextBox], y_overlap_ratio: float) -> bool:
+def _overlaps_row(box: TextBox, row: List[TextBox], y_overlap_ratio: float = 0.5) -> bool:
+    """Legacy helper preserved for backwards compatibility."""
     row_y1 = min(b.y1 for b in row)
     row_y2 = max(b.y2 for b in row)
     overlap = min(box.y2, row_y2) - max(box.y1, row_y1)
