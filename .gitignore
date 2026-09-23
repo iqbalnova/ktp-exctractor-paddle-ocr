@@ -1,0 +1,33 @@
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# macOS System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Archives & Temporary Outputs
+*.zip
+*.tar.gz
+output.json
+
+# Model Caches (if any placed locally)
+.paddlex/
+.paddleocr/
+
+# SENSITIVE: Personal ID / KTP images (do NOT leak personal data to public GitHub)
+*.jpeg
+*.jpg
+*.png
+!assets/example_dummy.png

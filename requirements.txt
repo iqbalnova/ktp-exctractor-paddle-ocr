@@ -1,0 +1,3 @@
+# CPU-only PaddlePaddle -- do NOT install paddlepaddle-gpu for this project.
+paddlepaddle==3.0.0
+paddleocr>=3.4.0,<4.0.0
