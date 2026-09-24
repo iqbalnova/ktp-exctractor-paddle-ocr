@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import calendar
 import re
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 # Common OCR character confusions seen on digit-heavy fields like NIK.
 _DIGIT_CONFUSIONS = {
@@ -112,3 +112,66 @@ def normalize_rt_rw(raw_value: str) -> str:
         # unheard of, and flag it as such via the raw digits fallback.
         return f"{digits[:3]}/{digits[3:]}"
     return raw_value.strip()
+
+
+def clean_pekerjaan(pekerjaan: str, regency: Optional[str] = None) -> str:
+    """Clean up trailing issuance stamp or regency/date text accidentally
+    merged into the Pekerjaan field. Does not restrict or mutate legitimate job titles.
+
+    Examples:
+        'PELAJAR/MAHASISWA KOTA BOGOR' -> 'PELAJAR/MAHASISWA'
+        'WIRASWASTA BANYUWANGI' -> 'WIRASWASTA'
+        'PROGRAMMER 12-05-2021' -> 'PROGRAMMER'
+    """
+    text = normalize_whitespace(pekerjaan)
+
+    # 1. Strip trailing date if present (e.g. 06-11-2020)
+    text = re.sub(r"\s+\d{2}[-\s/]\d{2}[-\s/]\d{4}$", "", text).strip()
+
+    # 2. Strip trailing regency name if known (e.g. BOGOR, BANYUWANGI)
+    if regency:
+        reg_clean = re.sub(r"^(KOTA|KABUPATEN)\s+", "", regency.strip(), flags=re.IGNORECASE).strip()
+        if reg_clean and len(reg_clean) >= 3:
+            pattern = rf"\s+(?:KOTA|KABUPATEN)?\s*{re.escape(reg_clean)}$"
+            text = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
+
+    # 3. Strip generic trailing "KOTA ..." or "KABUPATEN ..." (e.g. "PELAJAR/MAHASISWA KOTA BOGOR")
+    text = re.sub(r"\s+(?:KOTA|KABUPATEN)\s+[A-Z\s]+$", "", text, flags=re.IGNORECASE).strip()
+    return text
+
+
+
+def clean_kewarganegaraan(raw_value: str) -> str:
+    """Normalize kewarganegaraan, stripping accidental issuance date."""
+    upper = raw_value.upper()
+    if "WNA" in upper:
+        return "WNA"
+    if "WNI" in upper:
+        return "WNI"
+    return normalize_whitespace(raw_value)
+
+
+def normalize_tempat_tgl_lahir(raw: str) -> str:
+    """Normalize Tempat/Tgl Lahir so the separator between birthplace and birthdate
+    is consistently standardized as ', ' (comma space), fixing OCR misreads where
+    the comma was scanned as a dot, colon, or space.
+
+    Examples:
+        'FUJIAN.25-03-1977'  -> 'FUJIAN, 25-03-1977'
+        'BOGOR,30-10-2002'   -> 'BOGOR, 30-10-2002'
+        'JAKARTA 15-08-1995' -> 'JAKARTA, 15-08-1995'
+    """
+    if not raw:
+        return raw
+    text = normalize_whitespace(raw)
+    # Match: Place + separator + Date (DD-MM-YYYY or DD.MM.YYYY or DD/MM/YYYY)
+    m = re.search(r"^(.*?)[,.:;\s]+(\d{2}[-\s/.]\d{2}[-\s/.]\d{4})$", text)
+    if m:
+        place = re.sub(r"^[,\s:;.\-]+", "", m.group(1)).strip()
+        date_str = m.group(2).replace("/", "-").replace(".", "-").replace(" ", "-")
+        if place:
+            return f"{place}, {date_str}"
+        return date_str
+    return text
+
+

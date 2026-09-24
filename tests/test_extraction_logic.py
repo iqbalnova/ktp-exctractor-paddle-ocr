@@ -173,6 +173,42 @@ def test_bilingual_wna_field_extraction():
     print("OK: bilingual WNA field extraction & normalization")
 
 
+def test_pekerjaan_issuance_stamp_cleanup():
+    extractor = KTPExtractor.__new__(KTPExtractor)
+    boxes = [
+        box("PROVINSI JAWA BARAT", 0.98, 40, 10, 300, 30),
+        box("KOTA BOGOR", 0.97, 40, 32, 260, 52),
+        box("NIK 3271063010020008", 0.99, 40, 60, 300, 80),
+        box("Pekerjaan PELAJAR/MAHASISWA KOTA BOGOR", 0.99, 40, 90, 400, 110),
+        box("Kewarganegaraan: WNI 06-11-2020", 0.99, 40, 120, 350, 140),
+    ]
+    record = extractor.extract_from_boxes(boxes)
+    assert record.pekerjaan.found is True
+    assert record.pekerjaan.value == "PELAJAR/MAHASISWA", f"Expected 'PELAJAR/MAHASISWA', got {record.pekerjaan.value!r}"
+    assert record.kewarganegaraan.found is True
+    assert record.kewarganegaraan.value == "WNI", f"Expected 'WNI', got {record.kewarganegaraan.value!r}"
+    print("OK: pekerjaan and kewarganegaraan issuance stamp cleanup")
+
+
+def test_multiline_alamat_and_tempat_tgl_lahir_normalization():
+    extractor = KTPExtractor.__new__(KTPExtractor)
+    boxes = [
+        box("PROVINSI JAWA BARAT", 0.98, 40, 10, 300, 30),
+        box("KABUPATEN CIANJUR", 0.97, 40, 32, 260, 52),
+        box("NIK :3203012503770011", 0.99, 40, 60, 300, 80),
+        box("Tempat/Tgi Lahir FUJIAN.25-03-1977", 0.96, 40, 90, 350, 110),
+        box("Alamat JL SELAMET PERUMAHAN RANCABALI", 0.98, 40, 120, 380, 140),
+        box("NO.40", 0.95, 40, 145, 100, 165),
+        box("RT/RW 002/004", 0.97, 40, 170, 200, 190),
+    ]
+    record = extractor.extract_from_boxes(boxes)
+    assert record.tempat_tgl_lahir.found is True
+    assert record.tempat_tgl_lahir.value == "FUJIAN, 25-03-1977", f"Expected 'FUJIAN, 25-03-1977', got {record.tempat_tgl_lahir.value!r}"
+    assert record.alamat.found is True
+    assert record.alamat.value == "JL SELAMET PERUMAHAN RANCABALI NO.40", f"Expected 'JL SELAMET PERUMAHAN RANCABALI NO.40', got {record.alamat.value!r}"
+    print("OK: multi-line alamat continuation and tempat_tgl_lahir normalization")
+
+
 if __name__ == "__main__":
     test_end_to_end_extraction_with_synthetic_boxes()
     test_nik_validation_valid_male()
@@ -184,4 +220,8 @@ if __name__ == "__main__":
     test_label_fuzzy_matching_tolerates_typo()
     test_row_grouping_prevents_snowball_chaining()
     test_bilingual_wna_field_extraction()
+    test_pekerjaan_issuance_stamp_cleanup()
+    test_multiline_alamat_and_tempat_tgl_lahir_normalization()
     print("\nAll tests passed.")
+
+

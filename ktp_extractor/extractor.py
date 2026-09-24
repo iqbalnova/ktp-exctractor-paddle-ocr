@@ -20,7 +20,8 @@ from .models import FieldResult, KTPRecord, TextBox
 from .ocr_engine import PaddleOCREngine
 from .validators import (
     clean_digit_string, normalize_rt_rw, normalize_whitespace,
-    strip_label_punctuation, validate_nik,
+    strip_label_punctuation, validate_nik, clean_pekerjaan,
+    clean_kewarganegaraan, normalize_tempat_tgl_lahir,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,22 @@ class KTPExtractor:
             target.found = True
             target.confidence = row_confidence(rows[next_idx])
             target.source_row_text = texts[next_idx]
+
+        # Pass 2b: Multi-line continuation for Alamat
+        # If Alamat was found, any unlabeled row immediately following it
+        # (before the RT/RW row) is the second line of the address (e.g. 'NO.40' or 'BLOK C2 NO 15').
+        if record.alamat.found and record.alamat.value:
+            for idx, text in enumerate(texts):
+                if text == record.alamat.source_row_text or (record.alamat.source_row_text and text in record.alamat.source_row_text):
+                    next_idx = idx + 1
+                    if next_idx < len(texts):
+                        if not scan_row_for_labels(texts[next_idx], FIELD_LABELS):
+                            continuation = strip_label_punctuation(texts[next_idx])
+                            if continuation and not any(kw in continuation.upper() for kw in ("RT", "RW", "KEL", "DESA", "KECAMATAN", "AGAMA")):
+                                record.alamat.value = f"{record.alamat.value} {continuation}"
+                                record.alamat.source_row_text = f"{record.alamat.source_row_text} {texts[next_idx]}"
+                                record.alamat.confidence = (record.alamat.confidence + row_confidence(rows[next_idx])) / 2
+                    break
 
         # Pass 3: Positional fallback for Nama. If Nama was not detected via label
         # (common in faded cards), the row immediately following NIK is strictly the Name.
@@ -294,10 +311,15 @@ class KTPExtractor:
             elif not v or v == "-":
                 record.gol_darah.value = "-"
 
+        if record.tempat_tgl_lahir.found and record.tempat_tgl_lahir.value:
+            record.tempat_tgl_lahir.value = normalize_tempat_tgl_lahir(record.tempat_tgl_lahir.value)
+
+        if record.pekerjaan.found and record.pekerjaan.value:
+            regency_hint = record.kabupaten_kota.value if record.kabupaten_kota.found else None
+            record.pekerjaan.value = clean_pekerjaan(record.pekerjaan.value, regency=regency_hint)
+
         if record.kewarganegaraan.found and record.kewarganegaraan.value:
-            v = record.kewarganegaraan.value.upper()
-            if "WNI" in v:
-                record.kewarganegaraan.value = "WNI"
+            record.kewarganegaraan.value = clean_kewarganegaraan(record.kewarganegaraan.value)
 
         if record.nik.found and record.nik.value:
             is_valid, cleaned, notes = validate_nik(record.nik.value)
