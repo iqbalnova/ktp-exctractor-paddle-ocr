@@ -1,3 +1,12 @@
+---
+title: KTP Extractor API
+emoji: 🪪
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+---
+
 # ktp_extractor
 
 Production-grade, CPU-only KTP (Indonesian ID card) field extractor built on
@@ -30,19 +39,22 @@ This package instead:
    low-confidence, so a caller can route uncertain extractions to manual
    review instead of trusting them blindly.
 
-## Installation (Instalasi)
+## 🚀 Quick Start (Panduan Cepat Setelah Clone)
 
-Pilih instruksi instalasi sesuai sistem operasi yang Anda gunakan:
+File gambar sampel **`ktp1.jpg`** sudah disertakan langsung di dalam repository ini sehingga Anda bisa langsung mencoba ekstraksi tanpa perlu menyiapkan foto KTP sendiri.
 
 ---
 
-### 🍎 Opsi A: Pengguna macOS (Apple Silicon M1/M2/M3/M4 & Intel)
+### 1. Clone Repository & Setup Lingkungan
 
-Di macOS (terutama pengguna Homebrew dengan proteksi PEP 668), wajib menggunakan virtual environment:
+Pilih instruksi sesuai sistem operasi yang Anda gunakan:
+
+#### 🍎 Pengguna macOS (Apple Silicon M1/M2/M3/M4 & Intel)
 
 ```bash
-# 1. Buka Terminal dan masuk ke direktori project
-cd ktp-extractor-paddle-ocr
+# 1. Clone repository (atau download ZIP)
+git clone https://github.com/iqbalnova/ktp-exctractor-paddle-ocr.git
+cd ktp-exctractor-paddle-ocr
 
 # 2. Buat virtual environment
 python3 -m venv venv
@@ -50,166 +62,120 @@ python3 -m venv venv
 # 3. Aktifkan virtual environment
 source venv/bin/activate
 
-# 4. Install dependencies (CPU-only PaddlePaddle)
+# 4. Install dependencies (CPU-only PaddlePaddle & FastAPI)
 pip install -r requirements.txt
 ```
 
-> **Catatan khusus Apple Silicon (MacBook M1/M2/M3/M4):**  
-> `ktp_extractor` sudah dioptimalkan default untuk arsitektur CPU ARM64 (`enable_mkldnn=False`, `cpu_threads=2`, dan auto-resizing resolusi gambar).
-> 
-> Saat pertama kali dijalankan, sistem akan mengunduh model PP-OCRv5 (~150 MB) ke `~/.paddlex`. Setelah itu, library bekerja 100% offline tanpa internet.
+> **Catatan Apple Silicon:** Pada eksekusi pertama, PaddleOCR akan otomatis mengunduh bobot model PP-OCRv5 (~150 MB) ke `~/.paddlex`. Proses inferensi selanjutnya berjalan 100% lokal dan offline.
 
----
-
-### 💻 Opsi B: Pengguna Non-macOS (Windows & Linux)
-
-#### 🪟 1. Pengguna Windows
+#### 🪟 Pengguna Windows (CMD / PowerShell)
 
 Pastikan Python 3.10 – 3.12 sudah terinstall dan dicentang opsi *"Add python.exe to PATH"*.
 
-**Menggunakan Command Prompt (CMD):**
-```cmd
-:: 1. Masuk ke direktori project
-cd ktp-extractor-paddle-ocr
+* **Command Prompt (CMD):**
+  ```cmd
+  git clone https://github.com/iqbalnova/ktp-exctractor-paddle-ocr.git
+  cd ktp-exctractor-paddle-ocr
+  python -m venv venv
+  venv\Scripts\activate
+  pip install -r requirements.txt
+  ```
 
-:: 2. Buat virtual environment
-python -m venv venv
+* **PowerShell:**
+  ```powershell
+  git clone https://github.com/iqbalnova/ktp-exctractor-paddle-ocr.git
+  cd ktp-exctractor-paddle-ocr
+  python -m venv venv
+  .\venv\Scripts\Activate.ps1
+  pip install -r requirements.txt
+  ```
+  *(Jika muncul script execution policy error, jalankan: `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`)*
 
-:: 3. Aktifkan virtual environment
-venv\Scripts\activate
-
-:: 4. Install dependencies
-pip install -r requirements.txt
-```
-
-**Menggunakan PowerShell:**
-```powershell
-# 1. Buat virtual environment
-python -m venv venv
-
-# 2. Aktifkan virtual environment
-.\venv\Scripts\Activate.ps1
-
-# Catatan: Jika muncul error "execution of scripts is disabled on this system",
-# jalankan perintah ini terlebih dahulu di sesi PowerShell Anda:
-# Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-
-# 3. Install dependencies
-pip install -r requirements.txt
-```
-
-#### 🐧 2. Pengguna Linux (Ubuntu / Debian)
-
-Linux membutuhkan library sistem grafis tambahan untuk OpenCV & PaddleOCR:
+#### 🐧 Pengguna Linux (Ubuntu / Debian)
 
 ```bash
-# 1. Install library sistem yang dibutuhkan
+# 1. Install library sistem yang dibutuhkan OpenCV
 sudo apt update
 sudo apt install -y python3-venv python3-pip libgl1 libglib2.0-0
 
-# 2. Masuk ke direktori project
-cd ktp-extractor-paddle-ocr
+# 2. Clone dan masuk ke folder
+git clone https://github.com/iqbalnova/ktp-exctractor-paddle-ocr.git
+cd ktp-exctractor-paddle-ocr
 
-# 3. Buat virtual environment
+# 3. Buat dan aktifkan venv, lalu install dependencies
 python3 -m venv venv
-
-# 4. Aktifkan virtual environment
 source venv/bin/activate
-
-# 5. Install dependencies
 pip install -r requirements.txt
 ```
 
-> **Penting (Semua OS):** `requirements.txt` menginstall `paddlepaddle` versi CPU. **Jangan** install `paddlepaddle-gpu` karena tidak diperlukan dan membutuhkan CUDA toolkit yang sangat besar.
+---
+
+### 2. Cara Mencoba Ekstraksi dengan `ktp1.jpg`
+
+Pastikan virtual environment Anda sudah aktif (`venv`), lalu pilih cara yang Anda inginkan:
+
+#### 🔹 Opsi 1: Menjalankan Script Contoh (`example_usage.py`)
+Script ini menampilkan hasil ekstraksi field utama secara langsung di terminal:
+```bash
+python3 example_usage.py ktp1.jpg
+```
+*(Di Windows gunakan: `python example_usage.py ktp1.jpg`)*
+
+#### 🔹 Opsi 2: Menggunakan CLI (Output JSON Rapi)
+Mendapatkan output JSON terstruktur lengkap dengan confidence score dan status validasi NIK:
+```bash
+# Tampilkan output JSON rapi di terminal:
+python3 -m ktp_extractor.cli ktp1.jpg --pretty
+
+# Atau simpan output JSON ke dalam file:
+python3 -m ktp_extractor.cli ktp1.jpg > hasil_ktp1.json
+```
+
+#### 🔹 Opsi 3: Menjalankan REST API (FastAPI)
+Jalankan server API lokal:
+```bash
+python3 app.py
+# atau: uvicorn app:app --host 127.0.0.1 --port 8000
+```
+Setelah server berjalan:
+1. Buka browser ke **Swagger UI interaktif**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
+2. Klik endpoint **POST `/api/v1/extract`** $\rightarrow$ klik **Try it out** $\rightarrow$ pilih file `ktp1.jpg` $\rightarrow$ klik **Execute**.
+3. Atau uji coba langsung lewat `curl` di terminal lain:
+   ```bash
+   curl -X POST "http://127.0.0.1:8000/api/v1/extract" \
+        -F "file=@ktp1.jpg"
+   ```
+
+*(Catatan: Jika Anda menyetel environment variable `KTP_API_KEY`, tambahkan header `-H "X-API-Key: YOUR_KEY"` pada setiap request).*
 
 ---
 
-## Usage (Cara Menjalankan)
-
-### 🍎 Cara Pakai di macOS
-
-1. Buka Terminal dan pastikan virtual environment sudah aktif:
-   ```bash
-   source venv/bin/activate
-   ```
-   *(Tanda venv aktif: akan muncul `(venv)` di awal baris Terminal)*
-
-2. Jalankan ekstraksi:
-   ```bash
-   # Opsi 1: Menjalankan script contoh langsung
-   python3 example_usage.py ktp1.jpeg
-
-   # Opsi 2: Menggunakan CLI (Output JSON rapi)
-   python3 -m ktp_extractor.cli ktp1.jpeg --pretty
-
-   # Opsi 3: Simpan output JSON ke dalam file
-   python3 -m ktp_extractor.cli ktp1.jpeg > hasil_ekstraksi.json
-   ```
-
----
-
-### 💻 Cara Pakai di Non-macOS
-
-#### 🪟 Windows (Command Prompt / PowerShell)
-
-1. Buka CMD / PowerShell di folder project dan aktifkan venv:
-   - **Command Prompt (CMD):**
-     ```cmd
-     venv\Scripts\activate
-     ```
-   - **PowerShell:**
-     ```powershell
-     .\venv\Scripts\Activate.ps1
-     ```
-
-2. Jalankan ekstraksi:
-   ```cmd
-   :: Opsi 1: Menjalankan script contoh
-   python example_usage.py ktp1.jpeg
-
-   :: Opsi 2: Menggunakan CLI (Output JSON rapi)
-   python -m ktp_extractor.cli ktp1.jpeg --pretty
-
-   :: Opsi 3: Simpan output JSON ke file
-   python -m ktp_extractor.cli ktp1.jpeg > hasil_ekstraksi.json
-   ```
-
-#### 🐧 Linux
-
-1. Aktifkan virtual environment:
-   ```bash
-   source venv/bin/activate
-   ```
-
-2. Jalankan ekstraksi:
-   ```bash
-   python3 example_usage.py ktp1.jpeg
-   python3 -m ktp_extractor.cli ktp1.jpeg --pretty
-   ```
-
----
-
-### 🐍 Digunakan dalam Kode Python (Sama di Semua OS)
-
-Setelah venv aktif atau library terinstall, Anda dapat memanggilnya di skrip Python Anda:
+### 3. Menggunakan di Kode Python Anda Sendiri
 
 ```python
 from ktp_extractor import KTPExtractor
 
-# Inisialisasi extractor (default CPU)
+# 1. Inisialisasi extractor (CPU-only)
 extractor = KTPExtractor(lang="id")
-record = extractor.extract("ktp1.jpeg")
 
-print("Nama :", record.nama.value)
-print("NIK  :", record.nik.value, f"(Valid: {record.nik_valid})")
-print("TTL  :", record.tempat_tgl_lahir.value)
-print("Kota :", record.kabupaten_kota.value)
+# 2. Ekstrak data dari file gambar
+record = extractor.extract("ktp1.jpg")
 
-# Dump full data ke JSON
+# 3. Akses nilai field secara langsung
+print("Nama            :", record.nama.value)
+print("NIK             :", record.nik.value, f"(Valid: {record.nik_valid})")
+print("Tempat/Tgl Lahir:", record.tempat_tgl_lahir.value)
+print("Alamat          :", record.alamat.value)
+print("RT / RW         :", record.rt_rw.value)
+print("Kab/Kota        :", record.kabupaten_kota.value)
+print("Provinsi        :", record.provinsi.value)
+
+# 4. Export seluruh hasil ke format JSON
 print(record.to_json(indent=2))
 
+# 5. Cek field yang membutuhkan tinjauan manual jika confidence rendah
 if record.low_confidence_fields:
-    print("Perlu review:", record.low_confidence_fields)
+    print("Field perlu dicek manual:", record.low_confidence_fields)
 ```
 
 ## Design notes / known limitations

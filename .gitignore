@@ -26,11 +26,8 @@ output.json
 .paddlex/
 .paddleocr/
 
-# SENSITIVE: Personal ID / KTP images (do NOT leak personal data to public GitHub)
-*.jpeg
-*.jpg
-*.png
 !assets/example_dummy.png
 
 # Assets to ignore
 assets/
+img/
