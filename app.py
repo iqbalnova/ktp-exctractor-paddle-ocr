@@ -1,21 +1,15 @@
 """
 FastAPI application for Indonesian KTP OCR extraction using PaddleOCR.
 
-Lokal (tanpa API key, hanya request langsung ke localhost yang diterima):
-    uvicorn app:app --host 127.0.0.1 --port 8000
+Menjalankan server:
+    uvicorn app:app --host 0.0.0.0 --port 8000
     # atau: python app.py
 
-Dengan tunnel (WAJIB set API key):
-    export KTP_API_KEY="$(openssl rand -hex 32)"
-    uvicorn app:app --host 127.0.0.1 --port 8000
-    cloudflared tunnel --url http://localhost:8000
-
-Environment variables:
-    KTP_API_KEY          API key untuk header X-API-Key (wajib jika lewat tunnel)
+Environment variables (opsional):
     KTP_MAX_UPLOAD_MB    Batas ukuran gambar dalam MB (default 8)
-    KTP_CPU_THREADS      Jumlah thread CPU untuk OCR (default 4)
+    KTP_CPU_THREADS      Jumlah thread CPU untuk OCR (default 2)
     KTP_OCR_LANG         Bahasa OCR (default "id")
-    KTP_CORS_ORIGINS     Daftar origin dipisah koma; kosong = CORS mati (default)
+    KTP_CORS_ORIGINS     Daftar origin dipisah koma (default "*" / semua origin)
     KTP_DISABLE_DOCS     "1" untuk mematikan /docs dan /redoc
     KTP_HOST / PORT      Host & port saat dijalankan via `python app.py`
     KTP_RELOAD           "1" untuk auto-reload saat development
@@ -26,7 +20,6 @@ import base64
 import binascii
 import logging
 import os
-import secrets
 import tempfile
 import threading
 import time
@@ -34,20 +27,16 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import (
-    Depends,
     FastAPI,
     File,
     HTTPException,
-    Request,
     Response,
-    Security,
     UploadFile,
     status,
 )
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
-from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 from ktp_extractor import KTPExtractor, KTPExtractionError
@@ -58,54 +47,42 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ktp_api")
 
+
 # ---------------------------------------------------------------------------
 # Konfigurasi
 # ---------------------------------------------------------------------------
-API_KEY: Optional[str] = os.getenv("KTP_API_KEY") or None
 MAX_UPLOAD_BYTES = int(os.getenv("KTP_MAX_UPLOAD_MB", "8")) * 1024 * 1024
 DOCS_ENABLED = os.getenv("KTP_DISABLE_DOCS", "0") != "1"
-CORS_ORIGINS = [o.strip() for o in os.getenv("KTP_CORS_ORIGINS", "").split(",") if o.strip()]
+_raw_cors = os.getenv("KTP_CORS_ORIGINS", "*").strip()
+CORS_ORIGINS = [o.strip() for o in _raw_cors.split(",") if o.strip()] or ["*"]
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
-
-# Header yang ditambahkan proxy/tunnel (Cloudflare) pada request dari internet.
-# Request langsung ke localhost tidak membawa header ini.
-_PROXY_HEADERS = ("cf-connecting-ip", "cf-ray", "cf-visitor", "x-forwarded-for")
 
 # PaddleOCR berat di CPU: proses satu gambar pada satu waktu.
 OCR_LOCK = threading.Lock()
 
-_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+def _ensure_extractor(app: FastAPI) -> KTPExtractor:
+    """Lazy/thread-safe initializer so Uvicorn can bind port immediately on
+    startup while the OCR engine warms up in the background."""
+    extractor = getattr(app.state, "extractor", None)
+    if extractor is not None:
+        return extractor
+    cpu_threads = int(os.getenv("KTP_CPU_THREADS", "2"))
+    lang = os.getenv("KTP_OCR_LANG", "id")
+    logger.info("Initializing KTPExtractor with PaddleOCR PP-OCRv5 (lang=%s, threads=%d)...", lang, cpu_threads)
+    extractor = KTPExtractor(lang=lang, cpu_threads=cpu_threads)
+    app.state.extractor = extractor
+    logger.info("KTPExtractor initialized and ready to serve requests.")
+    return extractor
 
 
-# ---------------------------------------------------------------------------
-# Autentikasi
-# ---------------------------------------------------------------------------
-def require_auth(
-    request: Request,
-    api_key: Optional[str] = Security(_api_key_header),
-) -> None:
-    """
-    - Jika KTP_API_KEY di-set: semua request harus membawa X-API-Key yang benar.
-    - Jika tidak di-set: hanya request langsung (tanpa header proxy/tunnel)
-      yang diterima. Request lewat tunnel ditolak sampai API key di-set.
-    """
-    if API_KEY:
-        if api_key and secrets.compare_digest(api_key.encode(), API_KEY.encode()):
-            return
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key.",
-        )
-
-    if any(h in request.headers for h in _PROXY_HEADERS):
-        logger.warning(
-            "Request lewat proxy/tunnel ditolak karena KTP_API_KEY belum di-set."
-        )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="API key required.",
-        )
+def _background_warmup(app: FastAPI) -> None:
+    try:
+        with OCR_LOCK:
+            _ensure_extractor(app)
+    except Exception:
+        logger.exception("Background OCR warmup failed; will retry on first request.")
 
 
 # ---------------------------------------------------------------------------
@@ -113,19 +90,10 @@ def require_auth(
 # ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load the OCR models once into memory during startup."""
-    if API_KEY:
-        logger.info("Autentikasi API key: AKTIF.")
-    else:
-        logger.warning(
-            "KTP_API_KEY belum di-set: hanya request lokal langsung yang diterima. "
-            "Set KTP_API_KEY sebelum membuka lewat tunnel."
-        )
-    logger.info("Initializing KTPExtractor with PaddleOCR PP-OCRv5...")
-    cpu_threads = int(os.getenv("KTP_CPU_THREADS", "4"))
-    lang = os.getenv("KTP_OCR_LANG", "id")
-    app.state.extractor = KTPExtractor(lang=lang, cpu_threads=cpu_threads)
-    logger.info("KTPExtractor initialized and ready to serve requests.")
+    """Bind port immediately and warm up PaddleOCR in a background thread so
+    container deployment probes never time out waiting for model load."""
+    app.state.extractor = None
+    threading.Thread(target=_background_warmup, args=(app,), daemon=True).start()
     yield
 
 
@@ -139,16 +107,13 @@ app = FastAPI(
     openapi_url="/openapi.json" if DOCS_ENABLED else None,
 )
 
-# CORS hanya aktif jika origin diisi eksplisit (mis. frontend web Anda).
-# Jika pemanggilnya server/backend, CORS tidak diperlukan.
-if CORS_ORIGINS:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=CORS_ORIGINS,
-        allow_credentials=False,
-        allow_methods=["GET", "POST"],
-        allow_headers=["X-API-Key", "Content-Type"],
-    )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 
 class Base64ExtractRequest(BaseModel):
@@ -187,11 +152,12 @@ def _safe_remove(path: str) -> None:
         logger.warning("Gagal menghapus file sementara.")
 
 
-def _process_extraction(extractor: KTPExtractor, file_path: str) -> dict:
+def _process_extraction(file_path: str) -> dict:
     """Run extraction and return structured response with execution timing."""
     start_time = time.perf_counter()
     try:
         with OCR_LOCK:
+            extractor = _ensure_extractor(app)
             record = extractor.extract(file_path)
     except KTPExtractionError as exc:
         raise HTTPException(
@@ -199,7 +165,6 @@ def _process_extraction(extractor: KTPExtractor, file_path: str) -> dict:
             detail=f"KTP extraction failed: {exc}",
         ) from exc
     except Exception:
-        # Detail error hanya masuk log server, tidak dikirim ke klien.
         logger.exception("Unexpected error during extraction")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -229,13 +194,13 @@ async def _extract_bytes(data: bytes, suffix: str) -> dict:
 
     tmp_path = _write_temp(data, suffix)
     try:
-        return await run_in_threadpool(_process_extraction, app.state.extractor, tmp_path)
+        return await run_in_threadpool(_process_extraction, tmp_path)
     finally:
         _safe_remove(tmp_path)
 
 
 # ---------------------------------------------------------------------------
-# Endpoint umum (publik, tidak memproses data KTP)
+# Endpoint umum
 # ---------------------------------------------------------------------------
 @app.get("/", include_in_schema=False)
 def root():
@@ -262,21 +227,20 @@ def service_info():
 @app.get("/health", tags=["General"])
 def health_check():
     """Health check endpoint for monitoring."""
-    is_ready = hasattr(app.state, "extractor") and app.state.extractor is not None
+    is_ready = getattr(app.state, "extractor", None) is not None
     return {
-        "status": "healthy" if is_ready else "initializing",
+        "status": "healthy",
         "ocr_engine_ready": is_ready,
     }
 
 
 # ---------------------------------------------------------------------------
-# Endpoint ekstraksi (dilindungi)
+# Endpoint ekstraksi (publik, tanpa API key)
 # ---------------------------------------------------------------------------
 @app.post(
     "/api/v1/extract",
     tags=["Extraction"],
     summary="Extract KTP fields from uploaded image file",
-    dependencies=[Depends(require_auth)],
 )
 async def extract_from_file(
     response: Response,
@@ -290,7 +254,6 @@ async def extract_from_file(
             detail=f"Unsupported file extension '{ext}'. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
         )
 
-    # Baca maksimal batas + 1 byte; jika lebih, berarti file terlalu besar.
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     result = await _extract_bytes(content, ext or ".jpg")
     response.headers["Cache-Control"] = "no-store"
@@ -301,16 +264,13 @@ async def extract_from_file(
     "/api/v1/extract-base64",
     tags=["Extraction"],
     summary="Extract KTP fields from base64 encoded image",
-    dependencies=[Depends(require_auth)],
 )
 async def extract_from_base64(payload: Base64ExtractRequest, response: Response):
     """Submit a base64 encoded KTP image string in a JSON payload."""
     raw_b64 = payload.image_base64.strip()
-    # Strip data URL prefix if present (e.g. data:image/jpeg;base64,...)
     if raw_b64.startswith("data:") and "," in raw_b64:
         raw_b64 = raw_b64.split(",", 1)[1]
 
-    # Panjang base64 ~ 4/3 dari ukuran asli; tolak lebih awal sebelum decode.
     if len(raw_b64) > (MAX_UPLOAD_BYTES * 4) // 3 + 8:
         raise HTTPException(
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
