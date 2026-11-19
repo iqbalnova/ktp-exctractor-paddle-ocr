@@ -89,16 +89,25 @@ class PaddleOCREngine:
             use_doc_unwarping=use_doc_unwarping,
             use_textline_orientation=use_textline_orientation,
         )
+        det_model = os.getenv("KTP_DET_MODEL", "PP-OCRv5_mobile_det")
+        rec_model = "en_PP-OCRv5_mobile_rec" if lang == "en" else "latin_PP-OCRv5_mobile_rec"
         try:
-            self._ocr = PaddleOCR(lang=lang, ocr_version="PP-OCRv5", **common_kwargs)
+            self._ocr = PaddleOCR(
+                text_detection_model_name=det_model,
+                text_recognition_model_name=rec_model,
+                **common_kwargs,
+            )
         except Exception as exc:
             logger.warning(
-                "Failed to load PP-OCRv5 with lang=%r (%s); falling back to "
-                "lang='en'. Indonesian-specific character sets may be less "
-                "accurate.", lang, exc,
+                "Failed to load PP-OCRv5 mobile models (%s); falling back to "
+                "en_PP-OCRv5_mobile_rec.", exc,
             )
             self._lang = "en"
-            self._ocr = PaddleOCR(lang="en", ocr_version="PP-OCRv5", **common_kwargs)
+            self._ocr = PaddleOCR(
+                text_detection_model_name="PP-OCRv5_mobile_det",
+                text_recognition_model_name="en_PP-OCRv5_mobile_rec",
+                **common_kwargs,
+            )
 
     def run(self, image_path: str) -> List[TextBox]:
         """Run OCR on a single image file and return normalized text boxes."""
