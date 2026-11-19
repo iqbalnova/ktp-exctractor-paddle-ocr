@@ -48,6 +48,26 @@ class FieldResult:
 
 
 @dataclass
+class ValidationIssue:
+    """A single structured validation finding.
+
+    ``severity`` is "error" (the value is certainly wrong / unusable) or
+    "warning" (inconsistent or implausible -- route to manual review).
+    ``code`` is a stable machine-readable identifier, e.g.
+    ``NIK_DOB_MISMATCH``, safe to switch on in client code.
+    """
+    field: str
+    code: str
+    severity: str
+    message: str
+
+
+DECISION_ACCEPT = "ACCEPT"
+DECISION_REVIEW = "REVIEW"
+DECISION_REJECT = "REJECT"
+
+
+@dataclass
 class KTPRecord:
     """Structured representation of everything we attempt to extract from a
     single KTP image.
@@ -75,6 +95,11 @@ class KTPRecord:
     low_confidence_fields: list = field(default_factory=list)
     missing_fields: list = field(default_factory=list)
     overall_confidence: float = 0.0
+    # Structured findings (list of ValidationIssue) from field-level and
+    # cross-field validation, and the resulting routing decision:
+    # ACCEPT (auto-process), REVIEW (human check), REJECT (unusable).
+    issues: list = field(default_factory=list)
+    decision: str = "REVIEW"
     raw_text_lines: list = field(default_factory=list)
 
     def to_dict(self) -> dict:

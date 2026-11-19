@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import calendar
 import re
+from dataclasses import dataclass
+from datetime import date
 from typing import List, Tuple, Optional
 
 # Common OCR character confusions seen on digit-heavy fields like NIK.
@@ -39,11 +41,58 @@ def clean_digit_string(raw: str) -> str:
     return re.sub(r"\D", "", repaired)
 
 
+@dataclass(frozen=True)
+class NIKInfo:
+    province_code: str
+    regency_code: str
+    district_code: str
+    day: int
+    month: int
+    year_2digit: int
+    is_female: bool
+
+    def birth_date(self, today: Optional[date] = None) -> Optional[date]:
+        """Resolve the 2-digit year to the most recent century that does not
+        put the birth date in the future. None if the date is impossible."""
+        today = today or date.today()
+        for century in (2000, 1900):
+            year = century + self.year_2digit
+            try:
+                d = date(year, self.month, self.day)
+            except ValueError:
+                continue
+            if d <= today:
+                return d
+        return None
+
+
+def parse_nik(digits: str) -> Optional[NIKInfo]:
+    """Decode a 16-digit NIK string (no validation beyond shape)."""
+    if len(digits) != 16 or not digits.isdigit():
+        return None
+    dd = int(digits[6:8])
+    is_female = dd > 40
+    return NIKInfo(
+        province_code=digits[0:2],
+        regency_code=digits[2:4],
+        district_code=digits[4:6],
+        day=dd - 40 if is_female else dd,
+        month=int(digits[8:10]),
+        year_2digit=int(digits[10:12]),
+        is_female=is_female,
+    )
+
+
 def validate_nik(raw_value: str) -> Tuple[bool, str, List[str]]:
     """Validate and clean a candidate NIK string.
 
+    Checks: 16 digits, province code exists (reference/provinces.json),
+    regency/district codes non-zero, encoded birth date is a real date.
+
     Returns (is_valid, cleaned_16_digit_string_or_original, notes).
     """
+    from . import reference  # local import keeps this module dependency-light
+
     notes: List[str] = []
     digits = clean_digit_string(raw_value)
 
@@ -51,30 +100,38 @@ def validate_nik(raw_value: str) -> Tuple[bool, str, List[str]]:
         notes.append(f"Expected 16 digits after cleanup, got {len(digits)}.")
         return False, digits or raw_value, notes
 
-    dd = int(digits[6:8])
-    mm = int(digits[8:10])
-    yy = int(digits[10:12])
+    info = parse_nik(digits)
+    assert info is not None
 
-    if not (1 <= mm <= 12):
+    if info.province_code not in reference.provinces():
+        notes.append(f"Province code '{info.province_code}' is not a valid Indonesian province code.")
+        return False, digits, notes
+
+    if info.regency_code == "00":
+        notes.append("Regency/city code '00' is not valid.")
+        return False, digits, notes
+
+    if info.district_code == "00":
+        notes.append("District (kecamatan) code '00' is not valid.")
+        return False, digits, notes
+
+    if not (1 <= info.month <= 12):
         notes.append(f"Month segment '{digits[8:10]}' is not 01-12.")
         return False, digits, notes
 
-    is_female = dd > 40
-    day = dd - 40 if is_female else dd
-
     # Try both centuries; NIK doesn't encode which one.
     plausible_year_found = False
-    for century_year in (1900 + yy, 2000 + yy):
-        max_day = calendar.monthrange(century_year, mm)[1]
-        if 1 <= day <= max_day:
+    for century_year in (1900 + info.year_2digit, 2000 + info.year_2digit):
+        max_day = calendar.monthrange(century_year, info.month)[1]
+        if 1 <= info.day <= max_day:
             plausible_year_found = True
             break
 
     if not plausible_year_found:
-        notes.append(f"Day segment '{day:02d}' is not valid for month {mm:02d}.")
+        notes.append(f"Day segment '{info.day:02d}' is not valid for month {info.month:02d}.")
         return False, digits, notes
 
-    notes.append("female" if is_female else "male")
+    notes.append("female" if info.is_female else "male")
     return True, digits, notes
 
 
@@ -164,10 +221,12 @@ def normalize_tempat_tgl_lahir(raw: str) -> str:
     if not raw:
         return raw
     text = normalize_whitespace(raw)
+    # Collapse OCR spacing inside the date: '07 - 07 - 1997' -> '07-07-1997'
+    text = re.sub(r"(\d)\s*([-/.])\s*(?=\d)", r"\1\2", text)
     # Match: Place + separator + Date (DD-MM-YYYY or DD.MM.YYYY or DD/MM/YYYY)
-    m = re.search(r"^(.*?)[,.:;\s]+(\d{2}[-\s/.]\d{2}[-\s/.]\d{4})$", text)
+    m = re.search(r"^(.*?)[,.:;/\s]+(\d{2}[-\s/.]\d{2}[-\s/.]\d{4})$", text)
     if m:
-        place = re.sub(r"^[,\s:;.\-]+", "", m.group(1)).strip()
+        place = re.sub(r"^[,\s:;.\-]+|[,\s:;./\-]+$", "", m.group(1)).strip()
         date_str = m.group(2).replace("/", "-").replace(".", "-").replace(" ", "-")
         if place:
             return f"{place}, {date_str}"

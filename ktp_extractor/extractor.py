@@ -9,14 +9,20 @@ Pipeline:
 from __future__ import annotations
 
 import logging
+import os
+import re
+from difflib import SequenceMatcher
 from typing import List, Optional
+
+from . import reference, vocabulary
+from .consistency import decide, run_rules
 
 from .fields import (
     FIELD_LABELS, PROVINCE_KEYWORD, REGENCY_KEYWORDS,
     scan_row_for_labels,
 )
 from .layout import group_into_rows, row_text, row_confidence
-from .models import FieldResult, KTPRecord, TextBox
+from .models import FieldResult, KTPRecord, TextBox, ValidationIssue
 from .ocr_engine import PaddleOCREngine
 from .validators import (
     clean_digit_string, normalize_rt_rw, normalize_whitespace,
@@ -26,7 +32,16 @@ from .validators import (
 
 logger = logging.getLogger(__name__)
 
-LOW_CONFIDENCE_THRESHOLD = 0.75
+LOW_CONFIDENCE_THRESHOLD = float(os.getenv("KTP_LOW_CONFIDENCE_THRESHOLD", "0.75"))
+
+# Minimum similarity for snapping a printed value onto the official
+# vocabulary (reference/vocabulary.json).
+VOCAB_SNAP_MIN_SCORE = 0.75
+
+# Whole tokens that mark the start of the next KTP row rather than the
+# continuation of a two-line Alamat.
+_NON_ADDRESS_TOKENS = {"RT", "RW", "RT/RW", "KEL", "DESA", "KEL/DESA", "KECAMATAN", "AGAMA"}
+_RT_RW_VALUE_RE = re.compile(r"^\d{1,3}\s*/\s*\d{1,3}$")
 
 # Rows before the NIK row are assumed to be the province/regency header.
 # This caps how far down we'll look for that header so a stray early
@@ -108,7 +123,9 @@ class KTPExtractor:
                     if next_idx < len(texts):
                         if not scan_row_for_labels(texts[next_idx], FIELD_LABELS):
                             continuation = strip_label_punctuation(texts[next_idx])
-                            if continuation and not any(kw in continuation.upper() for kw in ("RT", "RW", "KEL", "DESA", "KECAMATAN", "AGAMA")):
+                            tokens = set(continuation.upper().replace(":", " ").split())
+                            if (continuation and not (tokens & _NON_ADDRESS_TOKENS)
+                                    and not _RT_RW_VALUE_RE.match(continuation)):
                                 record.alamat.value = f"{record.alamat.value} {continuation}"
                                 record.alamat.source_row_text = f"{record.alamat.source_row_text} {texts[next_idx]}"
                                 record.alamat.confidence = (record.alamat.confidence + row_confidence(rows[next_idx])) / 2
@@ -136,55 +153,13 @@ class KTPExtractor:
                         record.nama.source_row_text = cand_text
 
         # Pass 4: Value-driven fallback for Jenis Kelamin (e.g. lone "PEREMPUAN" or "LAKI-LAKI")
-        if not record.jenis_kelamin.found:
-            for idx, text in enumerate(texts):
-                upper = text.upper()
-                if "PEREMPUAN" in upper or "FEMALE" in upper:
-                    record.jenis_kelamin.value = "PEREMPUAN"
-                    record.jenis_kelamin.found = True
-                    record.jenis_kelamin.confidence = row_confidence(rows[idx])
-                    record.jenis_kelamin.source_row_text = text
-                    break
-                elif "LAKI" in upper or "MALE" in upper:
-                    record.jenis_kelamin.value = "LAKI-LAKI"
-                    record.jenis_kelamin.found = True
-                    record.jenis_kelamin.confidence = row_confidence(rows[idx])
-                    record.jenis_kelamin.source_row_text = text
-                    break
+        self._vocab_fallback(record.jenis_kelamin, "jenis_kelamin", rows, texts)
 
         # Pass 5: Value-driven fallback for Agama (lone religion name on faded label)
-        if not record.agama.found:
-            RELIGIONS = ("ISLAM", "KRISTEN", "KATOLIK", "HINDU", "BUDDHA", "BUDHA", "KONGHUCU")
-            for idx, text in enumerate(texts):
-                upper = text.upper()
-                for rel in RELIGIONS:
-                    words = upper.split()
-                    if rel in words:
-                        record.agama.value = rel if rel != "BUDHA" else "BUDDHA"
-                        record.agama.found = True
-                        record.agama.confidence = row_confidence(rows[idx])
-                        record.agama.source_row_text = text
-                        break
-                if record.agama.found:
-                    break
+        self._vocab_fallback(record.agama, "agama", rows, texts)
 
         # Pass 6: Value-driven fallback for Status Perkawinan
-        if not record.status_perkawinan.found:
-            for idx, text in enumerate(texts):
-                upper = text.upper()
-                if "BELUM KAWIN" in upper or "BELUM KAWN" in upper or "UNMARRIED" in upper:
-                    record.status_perkawinan.value = "BELUM KAWIN"
-                    record.status_perkawinan.found = True
-                    record.status_perkawinan.confidence = row_confidence(rows[idx])
-                    record.status_perkawinan.source_row_text = text
-                    break
-                elif "KAWIN" in upper or "MARRIED" in upper:
-                    if "BELUM" not in upper:
-                        record.status_perkawinan.value = "KAWIN"
-                        record.status_perkawinan.found = True
-                        record.status_perkawinan.confidence = row_confidence(rows[idx])
-                        record.status_perkawinan.source_row_text = text
-                        break
+        self._vocab_fallback(record.status_perkawinan, "status_perkawinan", rows, texts)
 
         # Pass 7: Positional fallback for Alamat (row immediately preceding RT/RW if untagged)
         if not record.alamat.found and record.rt_rw.found:
@@ -205,7 +180,7 @@ class KTPExtractor:
                 if record.kel_desa.value and record.kel_desa.value in text:
                     if idx + 1 < len(texts) and not scan_row_for_labels(texts[idx + 1], FIELD_LABELS):
                         cand = strip_label_punctuation(texts[idx + 1])
-                        if cand and not any(rel in cand.upper() for rel in ("ISLAM", "KRISTEN", "KATOLIK", "HINDU", "BUDDHA")):
+                        if cand and vocabulary.find_in_text(cand, "agama") is None:
                             record.kecamatan.value = cand
                             record.kecamatan.found = True
                             record.kecamatan.confidence = row_confidence(rows[idx + 1])
@@ -213,24 +188,14 @@ class KTPExtractor:
                     break
 
         # Pass 9: Value-driven fallback for Kewarganegaraan
-        if not record.kewarganegaraan.found:
-            for idx, text in enumerate(texts):
-                upper = text.upper().strip()
-                words = upper.split()
-                if "WNI" in words or "WNE" in words or upper in ("WNI", "WNE", "WN", "WNA") or "WN" in words:
-                    record.kewarganegaraan.value = "WNI" if "WNA" not in upper else "WNA"
-                    record.kewarganegaraan.found = True
-                    record.kewarganegaraan.confidence = row_confidence(rows[idx])
-                    record.kewarganegaraan.source_row_text = text
-                    break
+        self._vocab_fallback(record.kewarganegaraan, "kewarganegaraan", rows, texts)
 
         # Pass 10: Value-driven fallback for Berlaku Hingga
         if not record.berlaku_hingga.found:
-            import re
             date_pat = re.compile(r"(\d{2}[-\s/]\d{2}[-\s/]\d{4}|\d{4}[-\s/]\d{4})")
             for idx in range(len(texts) - 1, max(-1, len(texts) - 4), -1):
                 upper = texts[idx].upper()
-                if "SEUMUR HIDUP" in upper:
+                if vocabulary.find_in_text(upper, "berlaku_hingga"):
                     record.berlaku_hingga.value = "SEUMUR HIDUP"
                     record.berlaku_hingga.found = True
                     record.berlaku_hingga.confidence = row_confidence(rows[idx])
@@ -246,7 +211,25 @@ class KTPExtractor:
 
         self._postprocess(record)
         self._score(record)
+        record.issues.extend(run_rules(record))
+        record.decision = decide(record)
         return record
+
+    @staticmethod
+    def _vocab_fallback(target: FieldResult, vocab_name: str, rows, texts) -> None:
+        """Label-less fallback: take the first row that contains an official
+        vocabulary value as a whole word (e.g. a lone "ISLAM" whose
+        "Agama" label faded)."""
+        if target.found:
+            return
+        for idx, text in enumerate(texts):
+            canonical = vocabulary.find_in_text(text, vocab_name)
+            if canonical:
+                target.value = canonical
+                target.found = True
+                target.confidence = row_confidence(rows[idx])
+                target.source_row_text = text
+                return
 
     @staticmethod
     def _extract_header_field(rows, texts, limit, keyword_or_tuple, target: FieldResult) -> None:
@@ -286,30 +269,11 @@ class KTPExtractor:
         if record.rt_rw.found and record.rt_rw.value:
             record.rt_rw.value = normalize_rt_rw(record.rt_rw.value)
 
-        if record.jenis_kelamin.found and record.jenis_kelamin.value:
-            v = record.jenis_kelamin.value.upper()
-            if "PEREMPUAN" in v or "FEMALE" in v or v.startswith("P") or v.startswith("F"):
-                record.jenis_kelamin.value = "PEREMPUAN"
-            elif "LAKI" in v or "MALE" in v or v.startswith("L") or v.startswith("M"):
-                record.jenis_kelamin.value = "LAKI-LAKI"
+        for name in ("jenis_kelamin", "status_perkawinan", "agama", "gol_darah"):
+            KTPExtractor._snap_to_vocabulary(record, name)
 
-        if record.status_perkawinan.found and record.status_perkawinan.value:
-            v = record.status_perkawinan.value.upper()
-            if "BELUM" in v or "SINGLE" in v or "UNMARRIED" in v:
-                record.status_perkawinan.value = "BELUM KAWIN"
-            elif "KAWIN" in v or "MARRIED" in v:
-                record.status_perkawinan.value = "KAWIN"
-            elif "CERAI HIDUP" in v or "DIVORCED" in v:
-                record.status_perkawinan.value = "CERAI HIDUP"
-            elif "CERAI MATI" in v or "WIDOWED" in v:
-                record.status_perkawinan.value = "CERAI MATI"
-
-        if record.gol_darah.found and record.gol_darah.value:
-            v = record.gol_darah.value.upper().replace(":", "").replace(".", "").strip()
-            if v in ("A", "B", "AB", "O"):
-                record.gol_darah.value = v
-            elif not v or v == "-":
-                record.gol_darah.value = "-"
+        if record.provinsi.found and record.provinsi.value:
+            record.provinsi.value = KTPExtractor._snap_province(record.provinsi.value)
 
         if record.tempat_tgl_lahir.found and record.tempat_tgl_lahir.value:
             record.tempat_tgl_lahir.value = normalize_tempat_tgl_lahir(record.tempat_tgl_lahir.value)
@@ -328,9 +292,41 @@ class KTPExtractor:
             record.nik_validation_notes = notes
             if not is_valid:
                 logger.info("NIK failed validation: %s", notes)
+                record.issues.append(ValidationIssue("nik", "NIK_INVALID", "error", "; ".join(notes)))
         else:
             record.nik_valid = False
             record.nik_validation_notes = ["NIK field was not detected at all."]
+            record.issues.append(ValidationIssue("nik", "NIK_MISSING", "error", "NIK tidak terdeteksi."))
+
+    @staticmethod
+    def _snap_to_vocabulary(record: KTPRecord, name: str) -> None:
+        target: FieldResult = getattr(record, name)
+        if not (target.found and target.value):
+            return
+        canonical, score = vocabulary.snap(target.value, name, VOCAB_SNAP_MIN_SCORE)
+        if canonical is None:
+            record.issues.append(ValidationIssue(
+                name, "VALUE_NOT_IN_VOCABULARY", "warning",
+                f"Nilai '{target.value}' tidak dikenali sebagai nilai resmi "
+                f"({', '.join(vocabulary.canonical_values(name))}).",
+            ))
+            target.confidence = min(target.confidence, LOW_CONFIDENCE_THRESHOLD - 0.01)
+            return
+        target.value = canonical
+        target.confidence *= score
+
+    @staticmethod
+    def _snap_province(printed: str) -> str:
+        """Correct small OCR typos in the province name using the official
+        list; leave the value untouched if nothing is close enough."""
+        upper = normalize_whitespace(printed.upper())
+        best_name, best_score = None, 0.0
+        for names in reference.provinces().values():
+            for n in names:
+                score = SequenceMatcher(None, upper, n).ratio()
+                if score > best_score:
+                    best_name, best_score = names[0], score
+        return best_name if best_name and best_score >= 0.85 else printed
 
     @staticmethod
     def _score(record: KTPRecord) -> None:

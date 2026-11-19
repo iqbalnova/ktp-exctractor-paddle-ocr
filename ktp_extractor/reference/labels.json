@@ -1,0 +1,29 @@
+{
+  "_comment": "Katalog label field KTP. Urutan mengikuti layout fisik KTP. 'aliases' = rendering alternatif yang benar-benar teramati (bilingual WNA, misread OCR). Label hanya dicocokkan di AWAL baris, kecuali 'inline': true (label yang tercetak berdampingan di baris yang sama, mis. Gol. Darah di samping Jenis Kelamin). Jangan tambahkan potongan kata (mis. 'uatan') -- fuzzy matching sudah menangani salah eja ringan.",
+  "labels": [
+    {"key": "nik", "canonical": "NIK", "aliases": ["N I K", "NlK", "N1K"]},
+    {"key": "nama", "canonical": "Nama", "aliases": ["Name"]},
+    {"key": "tempat_tgl_lahir", "canonical": "Tempat/Tgl Lahir",
+     "aliases": ["Tempat Tgl Lahir", "Tempat/TglLahir", "TempatTgl Lahir", "Tempat/Tgi Lahir",
+                 "Tempat/Tgl Lah", "Tempat/TglLah", "Tempat/Tol Lah", "Tompal/ToiLahir", "Tompal/Toi Lahir",
+                 "Place/Date of Birth"]},
+    {"key": "jenis_kelamin", "canonical": "Jenis Kelamin",
+     "aliases": ["Jenis Kelamin / Sex", "JenisKelamin", "Sex"]},
+    {"key": "gol_darah", "canonical": "Gol. Darah",
+     "aliases": ["Gol. Darah / Blood Type", "GolDarah", "Gol Darah", "Blood Type"],
+     "min_similarity": 0.85, "inline": true},
+    {"key": "alamat", "canonical": "Alamat", "aliases": ["Address"], "min_similarity": 0.82},
+    {"key": "rt_rw", "canonical": "RT/RW", "aliases": ["RTRW", "RT / RW", "RT-RW", "RTAW"]},
+    {"key": "kel_desa", "canonical": "Kel/Desa", "aliases": ["KelDesa", "Kel Desa", "Ke/Desa", "Kel/Kelurahan"]},
+    {"key": "kecamatan", "canonical": "Kecamatan", "aliases": ["Kec.", "Kec"]},
+    {"key": "agama", "canonical": "Agama", "aliases": ["Agama / Religion", "Religion"]},
+    {"key": "status_perkawinan", "canonical": "Status Perkawinan",
+     "aliases": ["Status Perkawinan / Marital Status", "StatusPerkawinan", "Status Pedawnan", "Marital Status", "Status"]},
+    {"key": "pekerjaan", "canonical": "Pekerjaan",
+     "aliases": ["Pekerjaan / Occupation", "Occupation", "Pekerian", "Pekorjaan", "Pekerpaan"]},
+    {"key": "kewarganegaraan", "canonical": "Kewarganegaraan",
+     "aliases": ["Kewarganegaraan / Nationality", "Nationality", "Kewargnegaraan", "Kevarganegaraan", "Kawarganegaraan"]},
+    {"key": "berlaku_hingga", "canonical": "Berlaku Hingga",
+     "aliases": ["Berlaku Hingga / Expiry Date", "BerlakuHingga", "Berlaku Sampai", "Berlaku Hegga", "Expiry Date"]}
+  ]
+}

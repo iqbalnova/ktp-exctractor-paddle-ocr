@@ -1,8 +1,12 @@
 # CPU-only PaddlePaddle -- do NOT install paddlepaddle-gpu for this project.
 paddlepaddle==3.0.0
-paddleocr>=3.4.0,<4.0.0
+# Pin exact versions: paddleocr 3.7 defaults to PP-OCRv6 models, which
+# paddlepaddle 3.0.0 cannot load (ValueError: Type of attribute: strides).
+# This project runs PP-OCRv5 explicitly -- see ktp_extractor/ocr_engine.py.
+paddleocr==3.7.0
+paddlex==3.7.2
 
 # REST API dependencies
-fastapi>=0.110.0
-uvicorn[standard]>=0.28.0
+fastapi>=0.110.0,<1.0.0
+uvicorn[standard]>=0.28.0,<1.0.0
 python-multipart>=0.0.9

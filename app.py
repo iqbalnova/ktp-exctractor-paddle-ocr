@@ -132,7 +132,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="KTP Extractor API",
     description="Indonesian Identity Card (KTP) text extraction and field normalization API powered by PaddleOCR.",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
     docs_url="/docs" if DOCS_ENABLED else None,
     redoc_url="/redoc" if DOCS_ENABLED else None,
@@ -248,7 +248,7 @@ def service_info():
     """Service metadata and API information."""
     return {
         "service": "KTP Extractor API",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "status": "online",
         "docs_url": "/docs" if DOCS_ENABLED else None,
         "endpoints": {

@@ -1,0 +1,70 @@
+{
+  "_comment": "Vocabulary resmi per field. 'canonical' = nilai output yang diizinkan; 'synonyms' = varian (bilingual WNA / ejaan lama / misread OCR yang umum) -> canonical. Ubah file ini (atau set KTP_REFERENCE_DIR) untuk menambah nilai tanpa mengubah kode.",
+  "jenis_kelamin": {
+    "canonical": ["LAKI-LAKI", "PEREMPUAN"],
+    "synonyms": {
+      "LAKI LAKI": "LAKI-LAKI",
+      "LAKI": "LAKI-LAKI",
+      "PRIA": "LAKI-LAKI",
+      "MALE": "LAKI-LAKI",
+      "WANITA": "PEREMPUAN",
+      "FEMALE": "PEREMPUAN"
+    }
+  },
+  "gol_darah": {
+    "canonical": ["A", "B", "AB", "O", "-"],
+    "synonyms": {
+      "0": "O",
+      "A+": "A", "A-": "A",
+      "B+": "B", "B-": "B",
+      "AB+": "AB", "AB-": "AB",
+      "O+": "O", "O-": "O"
+    }
+  },
+  "agama": {
+    "canonical": ["ISLAM", "KRISTEN", "KATOLIK", "HINDU", "BUDDHA", "KONGHUCU", "KEPERCAYAAN TERHADAP TUHAN YME"],
+    "synonyms": {
+      "MUSLIM": "ISLAM",
+      "MOSLEM": "ISLAM",
+      "PROTESTAN": "KRISTEN",
+      "CHRISTIAN": "KRISTEN",
+      "KRISTEN PROTESTAN": "KRISTEN",
+      "KATHOLIK": "KATOLIK",
+      "CATHOLIC": "KATOLIK",
+      "BUDHA": "BUDDHA",
+      "BUDDHIST": "BUDDHA",
+      "KHONGHUCU": "KONGHUCU",
+      "KONG HU CU": "KONGHUCU",
+      "KONGHUCHU": "KONGHUCU",
+      "CONFUCIAN": "KONGHUCU",
+      "KEPERCAYAAN": "KEPERCAYAAN TERHADAP TUHAN YME"
+    }
+  },
+  "status_perkawinan": {
+    "canonical": ["BELUM KAWIN", "KAWIN", "CERAI HIDUP", "CERAI MATI"],
+    "synonyms": {
+      "BELUM KAWN": "BELUM KAWIN",
+      "SINGLE": "BELUM KAWIN",
+      "UNMARRIED": "BELUM KAWIN",
+      "NOT MARRIED": "BELUM KAWIN",
+      "MARRIED": "KAWIN",
+      "DIVORCED": "CERAI HIDUP",
+      "WIDOWED": "CERAI MATI",
+      "WIDOW": "CERAI MATI",
+      "WIDOWER": "CERAI MATI"
+    }
+  },
+  "kewarganegaraan": {
+    "canonical": ["WNI", "WNA"],
+    "synonyms": {
+      "WNE": "WNI"
+    }
+  },
+  "berlaku_hingga": {
+    "canonical": ["SEUMUR HIDUP"],
+    "synonyms": {
+      "SEUMUR HIDUP": "SEUMUR HIDUP",
+      "LIFETIME": "SEUMUR HIDUP"
+    }
+  }
+}
